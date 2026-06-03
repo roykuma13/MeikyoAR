@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>MEIKYO AR</title>
+
+<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image.prod.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/aframe/1.4.2/aframe.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
+
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0A0E1A; overflow: hidden; font-family: sans-serif; }
+
+  /* ローディング */
+  #loading-screen {
+    position: fixed; inset: 0; z-index: 9999;
+    background: #0A0E1A;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 20px;
+    transition: opacity 0.8s ease;
+  }
+  #loading-screen.hidden { opacity: 0; pointer-events: none; }
+
+  .ls-logo {
+    font-size: 32px; font-weight: 800;
+    letter-spacing: 0.2em; color: #fff;
+  }
+  .ls-logo span { color: #8DC63F; }
+
+  .loading-bar-wrap {
+    width: 160px; height: 1px;
+    background: rgba(255,255,255,0.1); border-radius: 1px; overflow: hidden;
+  }
+  .loading-bar {
+    height: 100%; width: 0%; background: #8DC63F;
+    animation: loadbar 3s ease forwards;
+  }
+  @keyframes loadbar { to { width: 100%; } }
+
+  .ls-hint {
+    font-size: 11px; color: rgba(255,255,255,0.3);
+    letter-spacing: 0.15em; text-transform: uppercase;
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:0.3} 50%{opacity:0.8} }
+
+  /* ステータスバー */
+  #status-bar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+    padding: 12px 20px;
+    display: flex; align-items: center; justify-content: space-between;
+    background: linear-gradient(to bottom, rgba(10,14,26,0.9), transparent);
+    pointer-events: none;
+  }
+  .status-logo {
+    font-size: 15px; font-weight: 800;
+    letter-spacing: 0.2em; color: #fff;
+  }
+  .status-logo span { color: #8DC63F; }
+  .status-badge {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10px; color: rgba(255,255,255,0.35);
+    letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .status-dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: #8DC63F;
+    animation: blink 2.5s ease-in-out infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.1} }
+
+  /* スキャンガイド */
+  #guide-overlay {
+    position: fixed; inset: 0; z-index: 500;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    pointer-events: none;
+    transition: opacity 0.5s ease;
+  }
+  #guide-overlay.hidden { opacity: 0; }
+
+  .finder-frame {
+    width: 200px; height: 200px; position: relative;
+  }
+  .finder-frame::before, .finder-frame::after,
+  .fc-br, .fc-bl {
+    content: ''; position: absolute;
+    width: 32px; height: 32px;
+    border-color: #8DC63F; border-style: solid;
+  }
+  .finder-frame::before { top:0; left:0;  border-width: 1.5px 0 0 1.5px; }
+  .finder-frame::after  { top:0; right:0; border-width: 1.5px 1.5px 0 0; }
+  .fc-br { bottom:0; right:0; border-width: 0 1.5px 1.5px 0; }
+  .fc-bl { bottom:0; left:0;  border-width: 0 0 1.5px 1.5px; }
+
+  .scan-line {
+    position: absolute; left: 0; right: 0; height: 1px;
+    background: linear-gradient(to right, transparent, #8DC63F, transparent);
+    top: 0; animation: scan 3s ease-in-out infinite;
+  }
+  @keyframes scan { 0%{top:0} 50%{top:100%} 100%{top:0} }
+
+  .guide-text {
+    margin-top: 20px; font-size: 11px;
+    color: rgba(255,255,255,0.4);
+    letter-spacing: 0.15em; text-transform: uppercase; text-align: center;
+  }
+  .guide-sub {
+    margin-top: 6px; font-size: 10px;
+    color: rgba(255,255,255,0.2);
+    letter-spacing: 0.08em; text-align: center;
+  }
+
+  /* 情報カード */
+  #info-card {
+    position: fixed; bottom: 24px; left: 50%;
+    transform: translateX(-50%) translateY(140px);
+    z-index: 900; width: 290px;
+    background: rgba(8,12,24,0.92);
+    border: 1px solid rgba(141,198,63,0.25);
+    border-radius: 12px; padding: 18px 22px;
+    backdrop-filter: blur(16px);
+    transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+    display: none;
+  }
+  #info-card.visible {
+    transform: translateX(-50%) translateY(0);
+    display: block;
+  }
+
+  .card-brand {
+    font-size: 18px; font-weight: 800;
+    letter-spacing: 0.2em; color: #fff; margin-bottom: 2px;
+  }
+  .card-brand span { color: #8DC63F; }
+  .card-sub {
+    font-size: 10px; color: rgba(255,255,255,0.35);
+    letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 14px;
+  }
+  .card-divider { height: 1px; background: rgba(255,255,255,0.06); margin-bottom: 12px; }
+
+  .card-link {
+    display: flex; align-items: center; gap: 10px;
+    color: rgba(255,255,255,0.5); text-decoration: none;
+    font-size: 12px; padding: 5px 0; transition: color 0.2s;
+  }
+  .card-link:hover { color: #8DC63F; }
+  .card-icon {
+    width: 26px; height: 26px; border-radius: 6px;
+    background: rgba(141,198,63,0.12);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; flex-shrink: 0;
+  }
+
+  /* 星キャンバス */
+  #star-canvas {
+    position: fixed; inset: 0; z-index: 100;
+    pointer-events: none;
+    opacity: 0; transition: opacity 1.5s ease;
+  }
+  #star-canvas.active { opacity: 1; }
+
+  a-scene { position: fixed !important; inset: 0; z-index: 200; }
+</style>
+</head>
+<body>
+
+<div id="loading-screen">
+  <div class="ls-logo">ME<span>I</span>KYO</div>
+  <div class="loading-bar-wrap"><div class="loading-bar"></div></div>
+  <div class="ls-hint">カメラを起動中</div>
+</div>
+
+<div id="status-bar">
+  <div class="status-logo">ME<span>I</span>KYO</div>
+  <div class="status-badge"><div class="status-dot"></div>AR READY</div>
+</div>
+
+<div id="guide-overlay">
+  <div class="finder-frame">
+    <div class="scan-line"></div>
+    <div class="fc-br"></div>
+    <div class="fc-bl"></div>
+  </div>
+  <div class="guide-text">MEIKYOロゴをかざしてください</div>
+  <div class="guide-sub">ロゴ全体がフレームに入るように</div>
+</div>
+
+<!-- 星エフェクト -->
+<canvas id="star-canvas"></canvas>
+
+<!-- 情報カード -->
+<div id="info-card">
+  <div class="card-brand">ME<span>I</span>KYO</div>
+  <div class="card-sub">［部署・役職など］</div>
+  <div class="card-divider"></div>
+  <a href="https://meikyo.example.com" class="card-link">
+    <div class="card-icon">🌐</div>meikyo.example.com
+  </a>
+  <a href="mailto:info@meikyo.example.com" class="card-link">
+    <div class="card-icon">✉️</div>info@meikyo.example.com
+  </a>
+  <a href="tel:0312345678" class="card-link">
+    <div class="card-icon">📞</div>03-1234-5678
+  </a>
+</div>
+
+<!-- MindAR シーン -->
+<a-scene
+  mindar-image="imageTargetSrc: ./targets.mind; autoStart: true; uiLoading: no; uiError: no; uiScanning: no;"
+  color-space="sRGB"
+  renderer="colorManagement: true; physicallyCorrectLights: true;"
+  vr-mode-ui="enabled: false"
+  device-orientation-permission-ui="enabled: false"
+>
+  <a-assets>
+    <img id="meikyo-logo" src="./meikyo_logo.png" crossorigin="anonymous">
+  </a-assets>
+
+  <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+  <a-entity mindar-image-target="targetIndex: 0" id="ar-target">
+
+    <!-- 薄いベースリング（ネイビー） -->
+    <a-torus
+      position="0 0 0"
+      radius="0.55" radius-tubular="0.005"
+      color="#1A2A6C" opacity="0.4"
+      animation="property: rotation; from: 0 0 0; to: 0 360 0; dur: 18000; loop: true; easing: linear">
+    </a-torus>
+
+    <!-- 細い外リング（黄緑・ゆっくり） -->
+    <a-torus
+      position="0 0.01 0"
+      radius="0.62" radius-tubular="0.004"
+      color="#8DC63F" opacity="0.3"
+      animation="property: rotation; from: 0 0 0; to: 0 -360 0; dur: 24000; loop: true; easing: linear">
+    </a-torus>
+
+    <!-- ロゴ画像（ゆっくりY軸回転＋静かな浮遊） -->
+    <a-image
+      src="#meikyo-logo"
+      width="0.9" height="0.9"
+      position="0 0.45 0"
+      animation__spin="property: rotation; from: 0 0 0; to: 0 360 0; dur: 12000; loop: true; easing: linear"
+      animation__float="property: position; from: 0 0.38 0; to: 0 0.52 0; dur: 4000; loop: true; dir: alternate; easing: easeInOutSine">
+    </a-image>
+
+  </a-entity>
+</a-scene>
+
+<script>
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    document.getElementById('loading-screen').classList.add('hidden');
+  }, 3200);
+});
+
+const guide    = document.getElementById('guide-overlay');
+const infoCard = document.getElementById('info-card');
+const canvas   = document.getElementById('star-canvas');
+const ctx      = canvas.getContext('2d');
+
+/* キャンバスサイズ */
+function resizeCanvas() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+/* ---- 星パーティクル ---- */
+let stars = [], animId = null, running = false;
+
+class Star {
+  constructor() { this.reset(); }
+  reset() {
+    // 画面上部からランダムに降ってくる
+    this.x     = Math.random() * canvas.width;
+    this.y     = Math.random() * canvas.height * 0.3; // 上1/3から出現
+    this.vy    = Math.random() * 0.35 + 0.08;         // ゆっくり落ちる
+    this.vx    = (Math.random() - 0.5) * 0.12;
+    this.r     = Math.random() * 1.4 + 0.3;
+    this.alpha = Math.random() * 0.5 + 0.1;
+    this.twinkle = Math.random() * Math.PI * 2; // 点滅位相
+    // ネイビー・白・黄緑の3色をランダムに（白が多め）
+    const palette = ['#ffffff','#ffffff','#ffffff','#8DC63F','#1A2A6C','#B8D87A'];
+    this.color = palette[Math.floor(Math.random() * palette.length)];
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.twinkle += 0.04;
+    // 点滅でアルファを揺らす
+    this.currentAlpha = this.alpha * (0.6 + 0.4 * Math.sin(this.twinkle));
+    if (this.y > canvas.height + 5) this.reset();
+  }
+  draw() {
+    ctx.save();
+    ctx.globalAlpha = this.currentAlpha;
+    ctx.fillStyle   = this.color;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function startStars() {
+  if (running) return;
+  running = true;
+  // 最初から画面全体に散らばった星を生成
+  for (let i = 0; i < 80; i++) {
+    const s = new Star();
+    s.y = Math.random() * canvas.height; // 初期位置は画面全体
+    stars.push(s);
+  }
+  loop();
+}
+
+function stopStars() {
+  running = false;
+  if (animId) cancelAnimationFrame(animId);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  stars = [];
+}
+
+function loop() {
+  if (!running) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  stars.forEach(s => { s.update(); s.draw(); });
+  animId = requestAnimationFrame(loop);
+}
+
+/* MindAR イベント */
+const sceneEl = document.querySelector('a-scene');
+sceneEl.addEventListener('arReady', () => {
+  document.getElementById('loading-screen').classList.add('hidden');
+});
+
+const target = document.getElementById('ar-target');
+target.addEventListener('targetFound', () => {
+  guide.classList.add('hidden');
+  infoCard.style.display = 'block';
+  setTimeout(() => infoCard.classList.add('visible'), 10);
+  canvas.classList.add('active');
+  startStars();
+});
+target.addEventListener('targetLost', () => {
+  guide.classList.remove('hidden');
+  infoCard.classList.remove('visible');
+  setTimeout(() => { infoCard.style.display = 'none'; }, 500);
+  canvas.classList.remove('active');
+  stopStars();
+});
+</script>
+</body>
+</html>
